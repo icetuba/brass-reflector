@@ -96,6 +96,39 @@ svg(instrument='trumpet', bells=[123, 127, 136, 140], outer=180, inner=92,
     offset=10, hole_diameter=4.5, thickness=3, output='trumpet.svg')
 ```
 
+## 3D-printing version (OpenSCAD)
+
+`reflector.scad` makes the same layout as a solid plate you can print. It uses the same presets, the same hole positions and the same checks. The bell-diameter labels are **engraved** into the top face.
+
+```bash
+# Default: euphonium
+openscad -o euphonium_reflector.stl reflector.scad
+
+# Pick a preset and change values with -D
+openscad -o trumpet.stl -D 'instrument="trumpet"' -D 'thickness=4' reflector.scad
+openscad -o custom.stl -D 'instrument="trombone"' -D 'bells=[210,230,250]' -D 'outer=310' reflector.scad
+```
+
+You can also open it in the OpenSCAD GUI and change the values in the **Customizer** panel.
+
+| Parameter | Default | Description |
+|---|---|---|
+| `instrument` | `"euphonium"` | The preset to use. |
+| `bells`, `outer`, `inner` | `[]`, `0`, `0` | Overrides. Leave them empty or at 0 to use the preset. |
+| `offset` | `10` | Same as `--offset`. **Provisional.** |
+| `hole` | `4.5` | Hole diameter. Printed holes usually come out a little small, so consider 4.7 to 4.8. |
+| `min_web` | `1` | Minimum material left between two holes. |
+| `thickness` | `3` | Plate thickness. Unlike in the SVG script, this value is used here. |
+| `labels` | `true` | Turns the engraved labels on or off. |
+| `label_size`, `label_depth`, `label_inset`, `label_font` | `3.7`, `0.6`, `7`, Liberation Sans Bold | How the labels look and where they sit. |
+| `ring_fn`, `hole_fn` | `256`, `48` | Curve smoothness, as the number of segments per circle. |
+
+Differences from the Python script:
+
+- It adds a check that every hole clears the centre opening.
+- The layout is mirrored to match how the SVG looks: the first hole is at the top and the bell sizes go clockwise. This is needed because OpenSCAD's y axis points up and SVG's points down.
+- If a check fails, OpenSCAD stops with an `assert` message, and the summary line is printed in the console with `echo`.
+
 ## Known limitations and notes
 
 - **Provisional offset.** The module docstring calls this value `contact_offset`. The CLI flag is `--offset`. They are the same thing.
