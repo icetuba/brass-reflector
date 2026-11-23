@@ -2,11 +2,14 @@
 
 Parametric **bell reflectors** for trumpet, trombone and euphonium. A reflector is a flat ring that mounts on the bell. It has three mounting holes for each supported bell size, so one plate fits several bells.
 
-The outer edge can be a plain **circle** or a **sunflower**, which adds pointed petals around the ring. The 3D version can also print the sunflower in **two colours**: a brown base with a yellow top, and the brown showing through only as lines.
+The outer edge can be a plain **circle** or a **sunflower**, which adds pointed petals around the ring. The ring face can have an **Apollonian gasket** pattern: circles packed inside circles around the large centre opening. The 3D version can print either design in **two colours**: a brown base with a yellow top, and the brown showing through only as lines.
 
-![Trumpet reflector, two-tone sunflower](samples/trumpet_sunflower.png)
+| Sunflower | Apollonian gasket |
+|---|---|
+| ![Trumpet reflector, two-tone sunflower](samples/trumpet_sunflower.png) | ![Trumpet reflector, two-tone Apollonian gasket](samples/trumpet_apollonian.png) |
+| `shape="sunflower"`, `two_tone=true` | `pattern="apollonian"`, `two_tone=true` |
 
-*Trumpet preset with `shape="sunflower"` and `two_tone=true`. The STLs are in [`samples/`](samples/).*
+*Both are the trumpet preset. The STLs are in [`samples/`](samples/). The edge shape and the pattern can be combined.*
 
 There are two generators. They use the same presets and put the holes in the same places:
 
@@ -41,6 +44,10 @@ openscad -o trumpet_reflector.stl -D 'instrument="trumpet"' reflector.scad
 # Sunflower edge, in either generator
 python3 draw_reflector.py --instrument trumpet --shape sunflower
 openscad -o trumpet_sunflower.stl -D 'instrument="trumpet"' -D 'shape="sunflower"' reflector.scad
+
+# Apollonian gasket pattern, in either generator
+python3 draw_reflector.py --instrument trumpet --pattern apollonian
+openscad -o trumpet_apollonian.stl -D 'instrument="trumpet"' -D 'pattern="apollonian"' reflector.scad
 ```
 
 Both print a summary line and a reminder that the geometry is provisional:
@@ -79,6 +86,22 @@ With `shape` set to `sunflower`, the outer circle is replaced by a ring of point
 - **Defaults:** 20 petals, and a petal length of 15% of `outer`. That gives these overall sizes: trumpet 234 mm, trombone 390 mm and euphonium 468 mm.
 - **Petal outline:** across each petal, the radius follows `outer/2 + petal_length · cos(πu/2)^0.6 · (1 − 0.25|u|)`, where `u` goes from −1 to 1. A petal tip sits at the top.
 
+### Apollonian gasket pattern
+
+With `pattern` set to `apollonian`, the ring face is decorated with an [Apollonian gasket](https://en.wikipedia.org/wiki/Apollonian_gasket):
+
+1. **The centre opening stays exactly `inner`.** The pattern is built around it.
+2. **Main ring of circles.** `n` equal circles (a [Steiner chain](https://en.wikipedia.org/wiki/Steiner_chain)) each touch the opening, their two neighbours and a boundary circle. With an opening of radius `r`, the boundary radius is `r · (1 + sin(π/n)) / (1 − sin(π/n))`. The script picks the smallest `n` that keeps the boundary at least 2 mm inside the outer edge, which gives 10 circles for trumpet and trombone and 11 for euphonium. The first circle is at the top.
+3. **Filling the gaps.** Every curved triangle between touching circles is filled with the circle that touches all three sides, found with [Descartes' circle theorem](https://en.wikipedia.org/wiki/Descartes%27_theorem). This repeats until the circles get smaller than `pattern_min` (default radius 2 mm). That gives 50 circles for trumpet, 110 for trombone and 121 for euphonium.
+
+The pattern is **drawn as lines, not cut out**. The mounting holes sit across the pattern, so cutting out the circles would weaken the plate around them. The lines are:
+
+- **SVG:** blue score lines in `<g id="score-pattern">`
+- **STL, one colour:** engraved `label_depth` deep, `pattern_line` wide (1 mm)
+- **STL, two colours:** gaps in the yellow top layer, so they show brown
+
+The pattern works with either outer edge. Both generators produce the same circles.
+
 ### Validation checks
 
 If any check fails, no file is written. Python raises a `ValueError`, and OpenSCAD stops with an `assert` error.
@@ -93,7 +116,8 @@ If any check fails, no file is written. Python raises a `ValueError`, and OpenSC
 | Centre opening | Every hole stays clear of the centre opening | — | ✓ |
 | Thickness and engraving | `thickness > 0` and `0 < label_depth < thickness` | — | ✓ |
 | Sunflower | At least 3 petals (the SVG script also requires `petal_length > 0`) | ✓ | ✓ |
-| Two-tone | Needs `shape="sunflower"`, `part="top"` needs `two_tone`, and `top_thickness` and `line_width` must be greater than 0 | — | ✓ |
+| Pattern | `pattern_min > 0` (and in the STL, `pattern_line > 0`). The gasket must fit between `inner` and `outer`. | ✓ | ✓ |
+| Two-tone | Needs `shape="sunflower"` or a pattern, `part="top"` needs `two_tone`, and `top_thickness` and `line_width` must be greater than 0 | — | ✓ |
 
 ## Laser cutting: `draw_reflector.py`
 
@@ -115,6 +139,8 @@ python3 draw_reflector.py --instrument trombone --bells 210 230 250 --outer 310 
 | `--shape` | `circle` | `circle` or `sunflower` |
 | `--petals` | `20` | Number of petals (sunflower only) |
 | `--petal-length` | 15% of `--outer` | How far the petals reach beyond `--outer` |
+| `--pattern` | `none` | `none` or `apollonian` |
+| `--pattern-min` | `2` | Smallest circle radius in the pattern, in mm |
 | `--output` | `<instrument>_reflector.svg` | Where to write the SVG |
 
 ### SVG output
@@ -122,6 +148,7 @@ python3 draw_reflector.py --instrument trombone --bells 210 230 250 --outer 310 
 - The `width` and `height` are set in `mm`, so the file opens at true size in Inkscape, LightBurn and similar tools. The canvas is the overall diameter plus 16 mm, square.
 - `<g id="laser-cut">`: the outer edge (a circle, or a sunflower `<path>`), the inner circle and every hole. Red (`#ff0000`), 0.1 mm stroke, no fill.
 - `<g id="engrave-labels">`: the bell-diameter labels. Blue (`#0055ff`), 3.7 mm sans-serif.
+- `<g id="score-pattern">`: the Apollonian circles, only when a pattern is on. Blue 0.1 mm stroke, no fill.
 
 In your laser software, set red to **cut** and blue to **engrave** or **score**.
 
@@ -142,7 +169,7 @@ openscad -o trumpet.stl -D 'instrument="trumpet"' -D 'thickness=4' -D 'hole=4.8'
 openscad -o custom.stl  -D 'instrument="trombone"' -D 'bells=[210,230,250]' -D 'outer=310' reflector.scad
 ```
 
-You can also open the file in the OpenSCAD GUI and change the values in the **Customizer** panel. A full render (F6) takes about 15–20 seconds.
+You can also open the file in the OpenSCAD GUI and change the values in the **Customizer** panel. A full render (F6) takes about 15–30 seconds for a plain or sunflower plate. With the Apollonian pattern it takes 30 seconds to 2.5 minutes, depending on the instrument and on two-tone.
 
 | Parameter | Default | Description |
 |---|---|---|
@@ -155,9 +182,12 @@ You can also open the file in the OpenSCAD GUI and change the values in the **Cu
 | `shape` | `"circle"` | `"circle"` or `"sunflower"` |
 | `petals` | `20` | Number of petals (sunflower only) |
 | `petal_length` | `0` | How far the petals reach beyond `outer`. 0 means 15% of `outer`. |
+| `pattern` | `"none"` | `"none"` or `"apollonian"` |
+| `pattern_min` | `2` | Smallest circle radius in the pattern |
+| `pattern_line` | `1` | Width of the pattern lines |
 | `labels` | `true` | Turns the engraved labels on or off |
 | `label_size`, `label_depth`, `label_inset`, `label_font` | `3.7`, `0.6`, `7`, Liberation Sans Bold | How the labels look and where they sit |
-| `two_tone` | `false` | Adds the petal-colour top layer (sunflower only). See below. |
+| `two_tone` | `false` | Adds the yellow top layer (needs the sunflower or a pattern). See below. |
 | `part` | `"all"` | Which part to export: `"all"`, `"base"` or `"top"` |
 | `top_thickness` | `1.2` | Thickness of the top layer |
 | `line_width` | `2` | Width of the outlines around and between petals |
@@ -167,17 +197,17 @@ You can also open the file in the OpenSCAD GUI and change the values in the **Cu
 
 Print it flat, with the engraved face up. You don't need supports.
 
-### Two-tone sunflower
+### Two-tone
 
-With `shape="sunflower"` and `two_tone=true`, a second layer is added on top of the plate. It's built like a layered wooden sign:
+With `two_tone=true`, a second layer is added on top of the plate. It needs `shape="sunflower"` or `pattern="apollonian"`, or both. It's built like a layered wooden sign:
 
 - **Base layer** (`thickness`, brown): the whole sunflower plate, including the centre opening and the mounting holes.
-- **Top layer** (`top_thickness`, yellow): covers the **whole top face**, ring and petals. Gaps of width `line_width` let the brown show through as lines:
-  - around the outside edge and between petals
-  - a circle between the ring and the petals
+- **Top layer** (`top_thickness`, yellow): covers the **whole top face**. Gaps of width `line_width` let the brown show through as lines:
+  - around the outside edge
   - a rim around the centre opening and around each mounting hole
-  - a tapered vein slit in each petal
   - the bell-diameter labels, which are cut through the yellow
+  - with the sunflower: gaps between the petals, a circle between the ring and the petals, and a tapered vein slit in each petal
+  - with the pattern: every gasket circle, `pattern_line` wide
 
 ```bash
 # Single-nozzle printer: one STL, change filament at the height printed in the console (Z = thickness)

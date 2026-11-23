@@ -36,8 +36,16 @@ petals = 20;
 // How far petals extend beyond the outer circle, mm (0 = 15% of outer)
 petal_length = 0;
 
-/* [Two-tone (sunflower only)] */
-// Add a top colour layer on the petals; gaps in it show the base colour as outlines
+/* [Pattern] */
+// Decorative line pattern on the ring face
+pattern = "none"; // [none, apollonian]
+// Smallest circle radius in the pattern, mm
+pattern_min = 2;
+// Width of the pattern lines, mm (engraved, or gaps in the two-tone top layer)
+pattern_line = 1;
+
+/* [Two-tone (needs sunflower or a pattern)] */
+// Add a top colour layer; gaps in it show the base colour as lines
 two_tone = false;
 // Part to export: all, base (outline colour) or top (petal colour)
 part = "all"; // [all, base, top]
@@ -91,6 +99,7 @@ ID = inner > 0 ? inner : P[2];
 n  = len(B);
 PL = petal_length > 0 ? petal_length : round(0.15 * OD * 10) / 10;
 sunflower = shape == "sunflower";
+apollonian = pattern == "apollonian";
 
 // ---------------------------------------------------------------------------
 // Hole layout: each bell gets 3 holes 120 deg apart, interleaved so the 3*n
@@ -115,7 +124,11 @@ assert(n > 0 && min([for (b = B) b]) > 0, "Bell diameters must be positive");
 assert(thickness > 0, "thickness must be positive");
 assert(shape == "circle" || shape == "sunflower", str("Unknown shape: ", shape));
 assert(!sunflower || petals >= 3, "Sunflower needs at least 3 petals");
-assert(!two_tone || sunflower, "two_tone needs shape = \"sunflower\"");
+assert(pattern == "none" || apollonian, str("Unknown pattern: ", pattern));
+assert(!apollonian || (pattern_min > 0 && pattern_line > 0),
+       "pattern_min and pattern_line must be positive");
+assert(!two_tone || sunflower || apollonian,
+       "two_tone needs shape = \"sunflower\" or a pattern");
 assert(part == "all" || part == "base" || part == "top", str("Unknown part: ", part));
 assert(part != "top" || two_tone, "part = \"top\" needs two_tone = true");
 assert(!two_tone || (top_thickness > 0 && line_width > 0),
@@ -148,6 +161,70 @@ echo(str(instrument, " reflector: ", len(holes), " holes, outer ", OD,
          sunflower ? str(", sunflower ", petals, " petals x ", PL,
                          " mm (overall ", OD + 2 * PL, " mm)") : "",
          ", min outer edge clearance ", outer_clear, " mm"));
+// ---------------------------------------------------------------------------
+// Apollonian gasket (same construction as draw_reflector.py).
+// A Steiner chain of n equal circles fits between the centre opening and a
+// boundary circle of radius GR; n is the smallest count that keeps GR within
+// gasket_margin of the outer edge. Each gap is filled recursively with
+// Descartes' circle theorem down to radius pattern_min.
+// Circles are [curvature, x, y]; the boundary has negative curvature.
+
+gasket_margin = 2;
+
+function steiner_R(n) = let (s = sin(180 / n)) (ID / 2) * (1 + s) / (1 - s);
+function steiner_n(n = 3) =
+    n > 500 ? undef : steiner_R(n) <= OD / 2 - gasket_margin ? n : steiner_n(n + 1);
+
+function cmul(p, q) = [p[0] * q[0] - p[1] * q[1], p[0] * q[1] + p[1] * q[0]];
+function csqrt(p) = let (m = norm(p))
+    [sqrt(max(0, (m + p[0]) / 2)), (p[1] < 0 ? -1 : 1) * sqrt(max(0, (m - p[0]) / 2))];
+function cz(c) = [c[1], c[2]];
+
+function tangent_error(c, t) =
+    let (r = 1 / c[0],
+         want = t[0] > 0 ? abs(1 / t[0] + r) : abs(-1 / t[0] - r))
+    abs(norm(cz(c) - cz(t)) - want);
+
+function descartes(a, b, c) =
+    let (k4 = a[0] + b[0] + c[0] + 2 * sqrt(max(0, a[0] * b[0] + b[0] * c[0] + c[0] * a[0])),
+         s = a[0] * cz(a) + b[0] * cz(b) + c[0] * cz(c),
+         p = a[0] * b[0] * cmul(cz(a), cz(b)) + b[0] * c[0] * cmul(cz(b), cz(c))
+           + c[0] * a[0] * cmul(cz(c), cz(a)),
+         root = csqrt(p),
+         z1 = (s + 2 * root) / k4,
+         z2 = (s - 2 * root) / k4,
+         c1 = [k4, z1[0], z1[1]],
+         c2 = [k4, z2[0], z2[1]],
+         e1 = tangent_error(c1, a) + tangent_error(c1, b) + tangent_error(c1, c),
+         e2 = tangent_error(c2, a) + tangent_error(c2, b) + tangent_error(c2, c))
+    e1 <= e2 ? c1 : c2;
+
+function gasket_fill(a, b, c) =
+    let (d = descartes(a, b, c))
+    1 / d[0] < pattern_min ? [] :
+    concat([d], gasket_fill(a, b, d), gasket_fill(b, c, d), gasket_fill(a, c, d));
+
+GN = apollonian ? steiner_n() : 0;
+GR = apollonian ? steiner_R(GN) : 0;
+
+function gasket_circles() =
+    let (rho = (GR - ID / 2) / 2,
+         d = (GR + ID / 2) / 2,
+         bound = [-1 / GR, 0, 0],
+         hub = [2 / ID, 0, 0],
+         chain = [for (j = [0 : GN - 1])
+                     let (a = 90 - 360 * j / GN) [1 / rho, d * cos(a), d * sin(a)]])
+    concat(chain,
+           [for (j = [0 : GN - 1])
+               let (A = chain[j], B = chain[(j + 1) % GN])
+               each concat(gasket_fill(hub, A, B), gasket_fill(bound, A, B))]);
+
+gasket = apollonian ? gasket_circles() : [];
+
+assert(!apollonian || GN != undef, "No room for the Apollonian pattern; increase outer");
+if (apollonian)
+    echo(str("Apollonian pattern: ", len(gasket), " circles (", GN, " in the main ring)"));
+
 if (two_tone)
     echo(str("Two-tone: total height ", thickness + top_thickness,
              " mm. Single extruder: change filament at Z = ", thickness, " mm."));
@@ -193,10 +270,12 @@ module top_layer_2d() {
         // Rim around the centre opening
         circle(r = ID / 2 + line_width, $fn = ring_fn);
         // Circle between the ring and the petals
-        difference() {
-            circle(r = OD / 2 + line_width, $fn = ring_fn);
-            circle(r = OD / 2, $fn = ring_fn);
-        }
+        if (sunflower)
+            difference() {
+                circle(r = OD / 2 + line_width, $fn = ring_fn);
+                circle(r = OD / 2, $fn = ring_fn);
+            }
+        pattern_lines_2d();
         // Rim around each mounting hole
         for (h = holes)
             translate([h[0], h[1]]) circle(d = hole + 2 * line_width, $fn = hole_fn);
@@ -217,6 +296,22 @@ module label_shapes() {
                      halign = "center", valign = "center");
 }
 
+// Pattern lines (2D): an outline ring of width pattern_line for every gasket
+// circle, plus the gasket's boundary circle.
+module line_ring(r, w) difference() {
+    circle(r = r + w / 2);
+    circle(r = max(eps, r - w / 2));
+}
+
+module pattern_lines_2d() {
+    if (apollonian) {
+        line_ring(GR, pattern_line, $fn = ring_fn);
+        for (c = gasket)
+            translate([c[1], c[2]])
+                line_ring(1 / c[0], pattern_line, $fn = max(24, min(ring_fn, round(6 / c[0]))));
+    }
+}
+
 module base_plate() difference() {
     // Ring
     difference() {
@@ -234,6 +329,11 @@ module base_plate() difference() {
     if (labels && !two_tone)
         translate([0, 0, thickness - label_depth])
             linear_extrude(height = label_depth + eps) label_shapes();
+
+    // Engraved pattern lines (single colour only; two-tone cuts them in the top layer)
+    if (apollonian && !two_tone)
+        translate([0, 0, thickness - label_depth])
+            linear_extrude(height = label_depth + eps) pattern_lines_2d();
 }
 
 if (part == "all" || part == "base")
