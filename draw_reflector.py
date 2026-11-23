@@ -15,10 +15,34 @@ PRESETS = {
     'euphonium': dict(bells=[266.7, 279.4, 292.1, 304.8], outer=360, inner=190),
 }
 
-def svg(instrument, bells, outer, inner, offset, hole_diameter, thickness, output):
+def petal_profile(u):
+    """Petal height (0..1) at position u in [-1, 1] across one petal; 0 = tip."""
+    return math.cos(math.pi * u / 2) ** 0.6 * (1 - 0.25 * abs(u))
+
+def sunflower_points(outer, petals, petal_length, samples_per_petal=64):
+    """Outline points for a sunflower edge. Valleys touch the outer circle and
+    petal tips reach outer/2 + petal_length. The first tip is at the top."""
+    pts = []
+    total = petals * samples_per_petal
+    for k in range(total):
+        phase = k / samples_per_petal          # petals from the top, 0 = tip
+        u = ((phase + 0.5) % 1) * 2 - 1
+        r = outer / 2 + petal_length * petal_profile(u)
+        a = math.radians(-90 + 360 * k / total)
+        pts.append((r * math.cos(a), r * math.sin(a)))
+    return pts
+
+def svg(instrument, bells, outer, inner, offset, hole_diameter, thickness, output,
+        shape='circle', petals=20, petal_length=None):
     """Create true-size SVG in millimeters, red cut paths and blue labels."""
     if not 0 < inner < outer or hole_diameter <= 0 or offset < 0:
         raise ValueError('Invalid dimensions')
+    if shape not in ('circle', 'sunflower'):
+        raise ValueError(f'Unknown shape: {shape}')
+    if petal_length is None:
+        petal_length = round(0.15 * outer, 1)
+    if shape == 'sunflower' and (petals < 3 or petal_length <= 0):
+        raise ValueError('Sunflower needs at least 3 petals and a positive petal length')
     if not bells or any(b <= 0 for b in bells):
         raise ValueError('Bell diameters must be positive')
     n = len(bells)
@@ -40,11 +64,17 @@ def svg(instrument, bells, outer, inner, offset, hole_diameter, thickness, outpu
             if math.dist(xy[i],xy[j]) < hole_diameter+1:
                 raise ValueError(f'Holes {i+1} and {j+1} too close; change bell sizes or layout')
     margin = 8
-    size = outer+2*margin
+    overall = outer + (2*petal_length if shape == 'sunflower' else 0)
+    size = overall+2*margin
     parts = [f'<svg xmlns="http://www.w3.org/2000/svg" width="{size}mm" height="{size}mm" viewBox="{-size/2} {-size/2} {size} {size}">',
              f'<title>{escape(instrument.title())} bell reflector, provisional geometry</title>',
              '<g id="laser-cut" fill="none" stroke="#ff0000" stroke-width="0.1">',
-             f'<circle r="{outer/2}"/><circle r="{inner/2}"/>']
+             f'<circle r="{inner/2}"/>']
+    if shape == 'sunflower':
+        pts = sunflower_points(outer, petals, petal_length)
+        parts.append('<path d="M' + ' L'.join(f'{x:.3f},{y:.3f}' for x, y in pts) + ' Z"/>')
+    else:
+        parts.append(f'<circle r="{outer/2}"/>')
     for x,y in xy:
         parts.append(f'<circle cx="{x:.4f}" cy="{y:.4f}" r="{hole_diameter/2:.4f}"/>')
     parts.append('</g><g id="engrave-labels" fill="#0055ff" font-family="Arial,sans-serif" font-size="3.7" text-anchor="middle" dominant-baseline="middle">')
@@ -56,7 +86,8 @@ def svg(instrument, bells, outer, inner, offset, hole_diameter, thickness, outpu
         parts.append(f'<text x="{lx:.3f}" y="{ly:.3f}">{b:g}</text>')
     parts.append('</g></svg>')
     Path(output).write_text('\n'.join(parts), encoding='utf-8')
-    print(f'Wrote {output}: {len(holes)} holes, outer {outer:g} mm, inner {inner:g} mm, min outer edge clearance {min_edge:.2f} mm')
+    shape_info = f', sunflower {petals} petals x {petal_length:g} mm (overall {overall:g} mm)' if shape == 'sunflower' else ''
+    print(f'Wrote {output}: {len(holes)} holes, outer {outer:g} mm, inner {inner:g} mm{shape_info}, min outer edge clearance {min_edge:.2f} mm')
     print('WARNING: Offset and ring dimensions are provisional; confirm geometry before fabrication.')
 
 def main():
@@ -68,12 +99,17 @@ def main():
     p.add_argument('--offset', type=float, default=10, help='Assumed mounting-hole radial offset from bell edge, mm (VERIFY)')
     p.add_argument('--hole', type=float, default=4.5, help='M4 clearance hole diameter in mm')
     p.add_argument('--thickness', type=float, default=3, help='Reference plate thickness, mm (not used in 2D SVG)')
+    p.add_argument('--shape', choices=['circle', 'sunflower'], default='circle',
+                   help='Outer edge shape; sunflower adds petals outside --outer')
+    p.add_argument('--petals', type=int, default=20, help='Number of petals (sunflower only)')
+    p.add_argument('--petal-length', type=float,
+                   help='How far petals extend beyond --outer, mm (default 15%% of --outer)')
     p.add_argument('--output', help='Output SVG path')
     a = p.parse_args()
     preset = PRESETS[a.instrument]
     svg(a.instrument, a.bells or preset['bells'], a.outer or preset['outer'],
         a.inner or preset['inner'], a.offset, a.hole, a.thickness,
-        a.output or f'{a.instrument}_reflector.svg')
+        a.output or f'{a.instrument}_reflector.svg', a.shape, a.petals, a.petal_length)
 
 if __name__ == '__main__':
     main()

@@ -28,8 +28,31 @@ hole = 4.5;
 // Minimum material left between holes and between a hole and an edge, mm
 min_web = 1;
 
+/* [Shape] */
+// Outer edge: plain circle, or sunflower petals added outside `outer`
+shape = "circle"; // [circle, sunflower]
+// Number of petals (sunflower only)
+petals = 20;
+// How far petals extend beyond the outer circle, mm (0 = 15% of outer)
+petal_length = 0;
+
+/* [Two-tone (sunflower only)] */
+// Add a top colour layer on the petals; gaps in it show the base colour as outlines
+two_tone = false;
+// Part to export: all, base (outline colour) or top (petal colour)
+part = "all"; // [all, base, top]
+// Thickness of the top colour layer, mm
+top_thickness = 1.2;
+// Width of the outlines around and between petals, mm
+line_width = 2;
+// Centre vein slit length, as a fraction of petal length (0 = no veins)
+vein_length = 0.55;
+// Preview colours (the STL has no colour)
+base_color = "SaddleBrown";
+top_color = "Gold";
+
 /* [Plate] */
-// Plate thickness in mm
+// Plate thickness in mm (the base layer when two_tone is on)
 thickness = 3;
 
 /* [Labels] */
@@ -66,6 +89,8 @@ B  = len(bells) > 0 ? bells : P[0];
 OD = outer > 0 ? outer : P[1];
 ID = inner > 0 ? inner : P[2];
 n  = len(B);
+PL = petal_length > 0 ? petal_length : round(0.15 * OD * 10) / 10;
+sunflower = shape == "sunflower";
 
 // ---------------------------------------------------------------------------
 // Hole layout: each bell gets 3 holes 120 deg apart, interleaved so the 3*n
@@ -88,6 +113,13 @@ assert(ID > 0 && ID < OD, "Invalid dimensions: need 0 < inner < outer");
 assert(hole > 0 && offset >= 0, "Invalid dimensions: need hole > 0 and offset >= 0");
 assert(n > 0 && min([for (b = B) b]) > 0, "Bell diameters must be positive");
 assert(thickness > 0, "thickness must be positive");
+assert(shape == "circle" || shape == "sunflower", str("Unknown shape: ", shape));
+assert(!sunflower || petals >= 3, "Sunflower needs at least 3 petals");
+assert(!two_tone || sunflower, "two_tone needs shape = \"sunflower\"");
+assert(part == "all" || part == "base" || part == "top", str("Unknown part: ", part));
+assert(part != "top" || two_tone, "part = \"top\" needs two_tone = true");
+assert(!two_tone || (top_thickness > 0 && line_width > 0),
+       "two_tone needs top_thickness > 0 and line_width > 0");
 assert(!labels || (label_depth > 0 && label_depth < thickness),
        "label_depth must be between 0 and thickness");
 
@@ -112,8 +144,13 @@ assert(len(too_close) == 0,
            " too close; change bell sizes or layout"));
 
 echo(str(instrument, " reflector: ", len(holes), " holes, outer ", OD,
-         " mm, inner ", ID, " mm, thickness ", thickness,
-         " mm, min outer edge clearance ", outer_clear, " mm"));
+         " mm, inner ", ID, " mm, thickness ", thickness, " mm",
+         sunflower ? str(", sunflower ", petals, " petals x ", PL,
+                         " mm (overall ", OD + 2 * PL, " mm)") : "",
+         ", min outer edge clearance ", outer_clear, " mm"));
+if (two_tone)
+    echo(str("Two-tone: total height ", thickness + top_thickness,
+             " mm. Single extruder: change filament at Z = ", thickness, " mm."));
 echo("WARNING: Offset and ring dimensions are provisional; confirm geometry before printing.");
 
 // ---------------------------------------------------------------------------
@@ -121,10 +158,69 @@ echo("WARNING: Offset and ring dimensions are provisional; confirm geometry befo
 
 eps = 0.01;
 
-difference() {
+// Sunflower edge (same curve as draw_reflector.py). Valleys touch the outer
+// circle and tips reach OD/2 + PL. The first tip is at the top.
+function petal_profile(u) = pow(cos(90 * u), 0.6) * (1 - 0.25 * abs(u));
+
+petal_samples = 64;
+function sunflower_points() = [
+    for (k = [0 : petals * petal_samples - 1])
+        let (phase = k / petal_samples,
+             u = ((phase + 0.5) % 1) * 2 - 1,
+             r = OD / 2 + PL * petal_profile(u),
+             a = 90 - 360 * k / (petals * petal_samples))
+        [r * cos(a), r * sin(a)]
+];
+
+module outline() {
+    if (sunflower) polygon(sunflower_points());
+    else circle(d = OD, $fn = ring_fn);
+}
+
+// Top colour layer (2D): covers the whole top face, so the base colour shows
+// only as lines: around the outside edge, between petals, a circle between the
+// ring and the petals, a rim around the centre opening and each hole, a vein
+// slit up each petal, and the labels (cut through this layer).
+module vein() {
+    r0 = OD / 2;
+    r1 = OD / 2 + vein_length * PL;
+    polygon([[r0, -line_width / 2], [r1, 0], [r0, line_width / 2]]);
+}
+
+module top_layer_2d() {
+    difference() {
+        offset(r = -line_width) outline();
+        // Rim around the centre opening
+        circle(r = ID / 2 + line_width, $fn = ring_fn);
+        // Circle between the ring and the petals
+        difference() {
+            circle(r = OD / 2 + line_width, $fn = ring_fn);
+            circle(r = OD / 2, $fn = ring_fn);
+        }
+        // Rim around each mounting hole
+        for (h = holes)
+            translate([h[0], h[1]]) circle(d = hole + 2 * line_width, $fn = hole_fn);
+        // Labels
+        if (labels) label_shapes();
+        if (vein_length > 0)
+            for (i = [0 : petals - 1])
+                rotate(90 - i * 360 / petals) vein();
+    }
+}
+
+// Bell-diameter labels (2D), placed label_inset toward the centre from each hole
+module label_shapes() {
+    for (h = holes)
+        let (lr = h[2] - label_inset)
+            translate([lr * cos(h[4]), lr * sin(h[4])])
+                text(str(h[3]), size = label_size, font = label_font,
+                     halign = "center", valign = "center");
+}
+
+module base_plate() difference() {
     // Ring
     difference() {
-        cylinder(d = OD, h = thickness, $fn = ring_fn);
+        linear_extrude(height = thickness) outline();
         translate([0, 0, -eps]) cylinder(d = ID, h = thickness + 2 * eps, $fn = ring_fn);
     }
 
@@ -133,12 +229,17 @@ difference() {
         translate([h[0], h[1], -eps])
             cylinder(d = hole, h = thickness + 2 * eps, $fn = hole_fn);
 
-    // Engraved labels showing the bell diameter each hole belongs to
-    if (labels)
-        for (h = holes)
-            let (lr = h[2] - label_inset)
-                translate([lr * cos(h[4]), lr * sin(h[4]), thickness - label_depth])
-                    linear_extrude(height = label_depth + eps)
-                        text(str(h[3]), size = label_size, font = label_font,
-                             halign = "center", valign = "center");
+    // Engraved labels showing the bell diameter each hole belongs to.
+    // In two-tone mode they're cut through the top layer instead.
+    if (labels && !two_tone)
+        translate([0, 0, thickness - label_depth])
+            linear_extrude(height = label_depth + eps) label_shapes();
 }
+
+if (part == "all" || part == "base")
+    color(base_color) base_plate();
+
+if (two_tone && (part == "all" || part == "top"))
+    color(top_color)
+        translate([0, 0, thickness])
+            linear_extrude(height = top_thickness) top_layer_2d();

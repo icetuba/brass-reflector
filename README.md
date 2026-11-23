@@ -2,6 +2,8 @@
 
 Parametric **bell reflectors** for trumpet, trombone and euphonium. A reflector is a flat ring that mounts on the bell. It has three mounting holes for each supported bell size, so one plate fits several bells.
 
+The outer edge can be a plain **circle** or a **sunflower**, which adds pointed petals around the ring. The 3D version can also print the sunflower in **two colours**: a brown base with a yellow top, and the brown showing through only as lines.
+
 There are two generators. They use the same presets and put the holes in the same places:
 
 | File | Output | For |
@@ -31,6 +33,10 @@ python3 draw_reflector.py --instrument trumpet
 
 # 3D printing: STL
 openscad -o trumpet_reflector.stl -D 'instrument="trumpet"' reflector.scad
+
+# Sunflower edge, in either generator
+python3 draw_reflector.py --instrument trumpet --shape sunflower
+openscad -o trumpet_sunflower.stl -D 'instrument="trumpet"' -D 'shape="sunflower"' reflector.scad
 ```
 
 Both print a summary line and a reminder that the geometry is provisional:
@@ -60,6 +66,15 @@ The plate is centred on the origin.
 2. **Hole angles.** Each bell gets 3 holes, 120° apart. With `n` bell sizes, the bells are offset by `360°/(3n)` from each other, so the `3n` holes are evenly spaced. Example: with 4 bells, there is a hole every 30°, and the bell sizes take turns around the ring. The first bell's first hole is at the top, and the bell sizes go clockwise.
 3. **Labels.** Each hole gets a label showing the **bell diameter** it belongs to. The label sits 7 mm closer to the centre than the hole, so you can tell which hole is for which bell.
 
+### Sunflower shape
+
+With `shape` set to `sunflower`, the outer circle is replaced by a ring of pointed petals:
+
+- **The petals sit outside `outer`.** The notches between the petals touch the outer circle, and the petal tips reach `outer/2 + petal_length`. The solid ring inside `outer` doesn't change, so the holes, the labels and every clearance check stay exactly as they are with a circle.
+- **The part gets bigger.** The overall diameter is `outer + 2 × petal_length`, and the summary line prints it.
+- **Defaults:** 20 petals, and a petal length of 15% of `outer`. That gives these overall sizes: trumpet 234 mm, trombone 390 mm and euphonium 468 mm.
+- **Petal outline:** across each petal, the radius follows `outer/2 + petal_length · cos(πu/2)^0.6 · (1 − 0.25|u|)`, where `u` goes from −1 to 1. A petal tip sits at the top.
+
 ### Validation checks
 
 If any check fails, no file is written. Python raises a `ValueError`, and OpenSCAD stops with an `assert` error.
@@ -73,6 +88,8 @@ If any check fails, no file is written. Python raises a `ValueError`, and OpenSC
 | Hole spacing | Hole centres are at least `hole + 1` mm apart (in the STL, `hole + min_web`) | ✓ | ✓ |
 | Centre opening | Every hole stays clear of the centre opening | — | ✓ |
 | Thickness and engraving | `thickness > 0` and `0 < label_depth < thickness` | — | ✓ |
+| Sunflower | At least 3 petals (the SVG script also requires `petal_length > 0`) | ✓ | ✓ |
+| Two-tone | Needs `shape="sunflower"`, `part="top"` needs `two_tone`, and `top_thickness` and `line_width` must be greater than 0 | — | ✓ |
 
 ## Laser cutting: `draw_reflector.py`
 
@@ -91,12 +108,15 @@ python3 draw_reflector.py --instrument trombone --bells 210 230 250 --outer 310 
 | `--offset` | `10` | How far each hole sits outward from the bell's rim, measured along the radius. **Provisional.** |
 | `--hole` | `4.5` | Hole diameter. 4.5 mm is a standard M4 clearance hole. |
 | `--thickness` | `3` | For reference only. The SVG does not use it. |
+| `--shape` | `circle` | `circle` or `sunflower` |
+| `--petals` | `20` | Number of petals (sunflower only) |
+| `--petal-length` | 15% of `--outer` | How far the petals reach beyond `--outer` |
 | `--output` | `<instrument>_reflector.svg` | Where to write the SVG |
 
 ### SVG output
 
-- The `width` and `height` are set in `mm`, so the file opens at true size in Inkscape, LightBurn and similar tools. The canvas is `outer + 16` mm square.
-- `<g id="laser-cut">`: the outer circle, the inner circle and every hole. Red (`#ff0000`), 0.1 mm stroke, no fill.
+- The `width` and `height` are set in `mm`, so the file opens at true size in Inkscape, LightBurn and similar tools. The canvas is the overall diameter plus 16 mm, square.
+- `<g id="laser-cut">`: the outer edge (a circle, or a sunflower `<path>`), the inner circle and every hole. Red (`#ff0000`), 0.1 mm stroke, no fill.
 - `<g id="engrave-labels">`: the bell-diameter labels. Blue (`#0055ff`), 3.7 mm sans-serif.
 
 In your laser software, set red to **cut** and blue to **engrave** or **score**.
@@ -128,11 +148,41 @@ You can also open the file in the OpenSCAD GUI and change the values in the **Cu
 | `hole` | `4.5` | Hole diameter. Printed holes usually come out small, so consider 4.7 to 4.8 for M4. |
 | `min_web` | `1` | Minimum material left between two holes |
 | `thickness` | `3` | Plate thickness |
+| `shape` | `"circle"` | `"circle"` or `"sunflower"` |
+| `petals` | `20` | Number of petals (sunflower only) |
+| `petal_length` | `0` | How far the petals reach beyond `outer`. 0 means 15% of `outer`. |
 | `labels` | `true` | Turns the engraved labels on or off |
 | `label_size`, `label_depth`, `label_inset`, `label_font` | `3.7`, `0.6`, `7`, Liberation Sans Bold | How the labels look and where they sit |
+| `two_tone` | `false` | Adds the petal-colour top layer (sunflower only). See below. |
+| `part` | `"all"` | Which part to export: `"all"`, `"base"` or `"top"` |
+| `top_thickness` | `1.2` | Thickness of the top layer |
+| `line_width` | `2` | Width of the outlines around and between petals |
+| `vein_length` | `0.55` | Length of the vein slit in each petal, as a fraction of the petal length. 0 turns veins off. |
+| `base_color`, `top_color` | `"SaddleBrown"`, `"Gold"` | Colours in the preview only. An STL has no colour. |
 | `ring_fn`, `hole_fn` | `256`, `48` | Curve smoothness, as the number of segments per circle |
 
 Print it flat, with the engraved face up. You don't need supports.
+
+### Two-tone sunflower
+
+With `shape="sunflower"` and `two_tone=true`, a second layer is added on top of the plate. It's built like a layered wooden sign:
+
+- **Base layer** (`thickness`, brown): the whole sunflower plate, including the centre opening and the mounting holes.
+- **Top layer** (`top_thickness`, yellow): covers the **whole top face**, ring and petals. Gaps of width `line_width` let the brown show through as lines:
+  - around the outside edge and between petals
+  - a circle between the ring and the petals
+  - a rim around the centre opening and around each mounting hole
+  - a tapered vein slit in each petal
+  - the bell-diameter labels, which are cut through the yellow
+
+```bash
+# Single-nozzle printer: one STL, change filament at the height printed in the console (Z = thickness)
+openscad -o sunflower.stl -D 'instrument="trumpet"' -D 'shape="sunflower"' -D 'two_tone=true' reflector.scad
+
+# Multi-colour printer (AMS, MMU, IDEX): export the two parts and load them as one object
+openscad -o sunflower_base.stl -D 'instrument="trumpet"' -D 'shape="sunflower"' -D 'two_tone=true' -D 'part="base"' reflector.scad
+openscad -o sunflower_top.stl  -D 'instrument="trumpet"' -D 'shape="sunflower"' -D 'two_tone=true' -D 'part="top"'  reflector.scad
+```
 
 ## Known limitations
 
@@ -140,4 +190,5 @@ Print it flat, with the engraved face up. You don't need supports.
 - **Labels aren't checked for collisions.** With tight dimensions, labels can overlap the inner edge or each other. Look at the output before you use it.
 - **The SVG script doesn't check the centre opening.** A large `--inner` with small bells can put holes inside the opening, and you get no error. The STL version does check this.
 - **Zero values fall back to the preset.** In both generators, `outer`/`inner` set to 0 counts as "not given", so the preset value is used and you get no error.
+- **Large parts may not fit your machine.** A plain trombone or euphonium ring is 300–360 mm across, and a sunflower is up to 468 mm. Most 3D-printer beds and many laser beds are smaller. You could print it in sections, use shorter petals, or check the size before you start.
 - **Python errors show as tracebacks.** The actual message is on the last line.
