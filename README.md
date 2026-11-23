@@ -4,6 +4,10 @@ Parametric **bell reflectors** for trumpet, trombone and euphonium. A reflector 
 
 The outer edge can be a plain **circle** or a **sunflower**, which adds pointed petals around the ring. The 3D version can also print the sunflower in **two colours**: a brown base with a yellow top, and the brown showing through only as lines.
 
+![Trumpet reflector, two-tone sunflower](samples/trumpet_sunflower.png)
+
+*Trumpet preset with `shape="sunflower"` and `two_tone=true`. The STLs are in [`samples/`](samples/).*
+
 There are two generators. They use the same presets and put the holes in the same places:
 
 | File | Output | For |
